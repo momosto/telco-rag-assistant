@@ -1,0 +1,5 @@
+.venv
+tests
+eval
+.github
+**/__pycache__
