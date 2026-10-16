@@ -139,3 +139,15 @@ def test_sources_lists_every_document():
 @pytest.mark.parametrize("question", ["Does Mhepo offer satellite TV packages?", "What is today's exchange rate for ZiG?"])
 def test_single_shared_word_is_not_enough_to_answer(retriever, question):
     assert retriever.search(question) == []
+
+
+def test_haiku_requests_skip_server_side_fallback(retriever, monkeypatch):
+    import anthropic
+
+    calls = []
+    content = [SimpleNamespace(type="text", text="USD 85 a month.", citations=[])]
+    monkeypatch.setenv("RAG_MODE", "claude")
+    monkeypatch.setattr(answer_mod, "MODEL", "claude-haiku-5-5")
+    monkeypatch.setattr(anthropic, "Anthropic", _fake_client(content, calls=calls))
+    answer_mod.answer("How much is Fibre Plus per month?", retriever)
+    assert "fallbacks" not in calls[0] and "betas" not in calls[0]

@@ -87,12 +87,13 @@ def _answer_with_claude(question: str, hits: list[Hit]) -> Answer:
         }
         for h in hits
     ]
+    # Server-side refusal fallbacks exist for the Opus, Fable and Sonnet lines, not Haiku.
+    fallback = {} if "haiku" in MODEL else {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
     response = client.beta.messages.create(
         model=MODEL,
         max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
         output_config={"effort": "low"},
+        **fallback,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": [*documents, {"type": "text", "text": question}]}],
     )
