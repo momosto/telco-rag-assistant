@@ -1,33 +1,28 @@
-"""Turn a question and retrieved chunks into a cited answer.
+"""Turn a question and retrieved sections into a cited answer, using only local models.
 
-Two modes:
-- "claude": the chunks are sent to Claude as documents with citations enabled, so
-  every claim in the answer points at the exact passage it came from.
-- "extractive": no API key needed. Returns the best-matching sentences verbatim,
-  each cited to its chunk. Used for the free public demo and for offline tests.
+Modes, chosen per answer:
+- "model": the local reading model (DistilBERT, SQuAD) found the answer span in a
+  section; the reply is the sentence containing it, with the span highlighted.
+- "section": the reader wasn't confident, or the models aren't installed, so the best
+  section is shown in full. Still cited.
+- "abstain": nothing in the documents matches the question.
+
+RAG_MODE=keyword forces the keyword-only pipeline (no models) for tests and comparison.
 """
 
 from __future__ import annotations
 
-import logging
 import os
-import re
 from dataclasses import asdict, dataclass, field
 
-from .retriever import SYNONYMS, BM25Retriever, Hit, tokenize
+from .retriever import SYNONYMS, Hit, tokenize
 
-log = logging.getLogger(__name__)
-
-MODEL = os.environ.get("RAG_MODEL", "claude-opus-5-5")
 IDK = "I don't know. I couldn't find that in Mhepo's documents."
 
-SYSTEM_PROMPT = """You are the customer support assistant for Mhepo Telecom, a telecom provider in Zimbabwe.
-
-Answer the customer's question using only the documents provided in this message. Be brief and specific: lead with the direct answer (price, time, code or yes/no), then add only the conditions the customer needs to know.
-
-If the documents do not contain the answer, reply with exactly: "I don't know. I couldn't find that in Mhepo's documents." Do not guess, and do not use outside knowledge about other telecom companies.
-
-Reply in the language the customer used. Customers may write in English or Shona."""
+# Below this span probability the reader is usually pointing at something nearby rather
+# than the answer, so the whole section is shown instead. Calibrated on eval/questions.json.
+MIN_CONFIDENCE = 0.3
+READ_TOP = 3  # sections the reader looks at
 
 
 @dataclass
@@ -40,90 +35,80 @@ class Citation:
 @dataclass
 class Answer:
     text: str
-    mode: str  # "claude" | "extractive" | "abstain"
+    mode: str  # "model" | "section" | "abstain"
     citations: list[Citation] = field(default_factory=list)
-    retrieved: list[str] = field(default_factory=list)  # chunk titles, for debugging and evals
-    note: str | None = None
+    retrieved: list[str] = field(default_factory=list)  # section titles, for debugging and evals
+    highlight: str | None = None  # the exact answer span inside `text`, when the reader found one
+    confidence: float | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def use_claude() -> bool:
-    mode = os.environ.get("RAG_MODE", "auto")
-    if mode == "extractive":
-        return False
-    if mode == "claude":
-        return True
-    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+def use_models() -> bool:
+    from .models import models_available
+
+    return os.environ.get("RAG_MODE", "auto") != "keyword" and models_available()
 
 
-def answer(question: str, retriever: BM25Retriever, k: int = 4) -> Answer:
+def answer(question: str, retriever, k: int = 4) -> Answer:
     hits = retriever.search(question, k=k)
     retrieved = [h.chunk.title for h in hits]
     if not hits:
         return Answer(IDK, "abstain", retrieved=retrieved)
-    if use_claude():
-        try:
-            return _answer_with_claude(question, hits)
-        except Exception as exc:  # network, auth or rate-limit: degrade, don't fail the request
-            log.warning("Claude call failed, falling back to extractive: %s", exc)
-            result = _answer_extractive(question, hits, retriever.idf)
-            result.note = "The AI model was unavailable, so this answer is quoted directly from the documents."
+    if use_models():
+        result = _answer_with_reader(question, hits, getattr(retriever, "idf", {}))
+        if result:
+            result.retrieved = retrieved
             return result
-    return _answer_extractive(question, hits, retriever.idf)
+    return _answer_section(question, hits, getattr(retriever, "idf", {}))
 
 
-def _answer_with_claude(question: str, hits: list[Hit]) -> Answer:
-    import anthropic
+def _answer_with_reader(question: str, hits: list[Hit], idf: dict[str, float]) -> Answer | None:
+    from .hybrid import section_context
+    from .models import get_reader
 
-    client = anthropic.Anthropic()
-    documents = [
-        {
-            "type": "document",
-            "source": {"type": "text", "media_type": "text/plain", "data": h.chunk.text},
-            "title": h.chunk.title,
-            "citations": {"enabled": True},
-        }
-        for h in hits
-    ]
-    # Server-side refusal fallbacks exist for the Opus, Fable and Sonnet lines, not Haiku.
-    fallback = {} if "haiku" in MODEL else {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
-    response = client.beta.messages.create(
-        model=MODEL,
-        max_tokens=16000,
-        output_config={"effort": "low"},
-        **fallback,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": [*documents, {"type": "text", "text": question}]}],
+    terms = set(tokenize(question))
+    terms |= {syn for t in terms for syn in SYNONYMS.get(t, [])}
+    # Read the top sections as one text in a single pass. Reader confidence is a softmax
+    # over the text it sees, so scores from separate passes aren't comparable: it can be
+    # very sure of an answer inside an irrelevant section. One pass makes them compete.
+    pieces, offsets, cursor = [], [], 0
+    for hit in hits[:READ_TOP]:
+        piece = section_context(hit.chunk, terms, idf, heading=False)
+        offsets.append((cursor, cursor + len(piece), hit))
+        pieces.append(piece)
+        cursor += len(piece) + 2
+    context = "\n\n".join(pieces)
+
+    span = get_reader().read(question, context)
+    if span is None or span.confidence < MIN_CONFIDENCE:
+        return None
+    # Spans can run across a line break into the next list item; keep the first line.
+    text = span.text.split("\n")[0].strip()
+    if not text:
+        return None
+    hit = next(h for begin, finish, h in offsets if begin <= span.start < finish)
+    sentence = _sentence_around(context, span.start, span.start + len(text))
+    # The citation carries the whole section, so the customer can check the highlighted
+    # answer against everything the section says.
+    section = "\n".join(format_section(hit.chunk.text, terms, idf))
+    return Answer(
+        text=sentence,
+        mode="model",
+        citations=[Citation(hit.chunk.source, hit.chunk.title, section)],
+        highlight=text,
+        confidence=round(span.confidence, 3),
     )
-    retrieved = [h.chunk.title for h in hits]
 
-    if response.stop_reason == "refusal":
-        return Answer("I can't help with that request.", "abstain", retrieved=retrieved)
 
-    text_parts: list[str] = []
-    citations: list[Citation] = []
-    seen = set()
-    for block in response.content:
-        if block.type != "text":
-            continue
-        text_parts.append(block.text)
-        for c in getattr(block, "citations", None) or []:
-            index = getattr(c, "document_index", None)
-            if index is None or index >= len(hits):
-                continue
-            chunk = hits[index].chunk
-            quote = c.cited_text.strip()
-            if (chunk.id, quote) in seen:
-                continue
-            seen.add((chunk.id, quote))
-            citations.append(Citation(chunk.source, chunk.title, quote))
-
-    text = "".join(text_parts).strip()
-    if text.lower().startswith("i don't know") or text.lower().startswith("i don’t know"):
-        return Answer(IDK, "abstain", retrieved=retrieved)
-    return Answer(text, "claude", citations, retrieved)
+def _sentence_around(text: str, start: int, end: int) -> str:
+    """The line or sentence that contains characters start..end."""
+    newline, full_stop = text.rfind("\n", 0, start), text.rfind(". ", 0, start)
+    begin = max(newline + 1, full_stop + 2 if full_stop != -1 else 0)
+    stops = [i for i in (text.find("\n", end), text.find(". ", end)) if i != -1]
+    finish = min(stops) + 1 if stops else len(text)
+    return text[begin:finish].strip()
 
 
 def _cells(line: str) -> list[str]:
@@ -152,7 +137,7 @@ def format_section(text: str, terms: set[str], idf: dict[str, float]) -> list[st
             row_terms = {t for t in terms - header_terms if idf.get(t, 0) > 1.0}
             matching = [r for r in rows if row_terms & set(tokenize(" ".join(r)))]
             for row in matching or rows:
-                details = ", ".join(f"{v}" for v in row[1:])
+                details = ", ".join(row[1:])
                 out.append(f"{row[0]}: {details}" if details else row[0])
             continue
         if line:
@@ -161,20 +146,15 @@ def format_section(text: str, terms: set[str], idf: dict[str, float]) -> list[st
     return out
 
 
-def _answer_extractive(question: str, hits: list[Hit], idf: dict[str, float] | None = None) -> Answer:
-    """Without a model, answer with the best-matching section, quoted in full."""
-    retrieved = [h.chunk.title for h in hits]
-    if not hits:
-        return Answer(IDK, "abstain", retrieved=retrieved)
+def _answer_section(question: str, hits: list[Hit], idf: dict[str, float]) -> Answer:
+    """Show the best-matching section in full, plus the runner-up when it is a near-tie."""
     terms = set(tokenize(question))
     terms |= {syn for t in terms for syn in SYNONYMS.get(t, [])}
-    # Quote the best section, plus the runner-up when it scores nearly as well: near-ties
-    # usually mean the answer spans two sections ("lost SIM": registration and replacement).
     chosen = [hits[0]] + [h for h in hits[1:2] if h.score >= hits[0].score * 0.8]
     parts, citations = [], []
     for hit in chosen:
-        lines = format_section(hit.chunk.text, terms, idf or {})
+        lines = format_section(hit.chunk.text, terms, idf)
         heading = hit.chunk.title.split(" > ")[-1]
         parts.append(f"From \u201c{heading}\u201d:\n" + "\n".join(lines))
         citations.append(Citation(hit.chunk.source, hit.chunk.title, "\n".join(lines)))
-    return Answer("\n\n".join(parts), "extractive", citations, retrieved)
+    return Answer("\n\n".join(parts), "section", citations)

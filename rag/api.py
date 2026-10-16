@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .answer import answer, use_claude
+from .answer import answer, use_models
 from .ingest import load_directory
 from .retriever import BM25Retriever
 
@@ -29,8 +29,20 @@ app = FastAPI(title="Telco RAG Assistant", version="1.0.0")
 
 
 @lru_cache(maxsize=1)
-def get_retriever() -> BM25Retriever:
+def get_keyword_retriever() -> BM25Retriever:
     return BM25Retriever(load_directory(DOCS_DIR))
+
+
+@lru_cache(maxsize=1)
+def get_retriever():
+    """Hybrid keyword + embedding search when the local models are installed, else keywords."""
+    keyword = get_keyword_retriever()
+    if not use_models():
+        return keyword
+    from .hybrid import HybridRetriever
+    from .models import get_embedder
+
+    return HybridRetriever(keyword, get_embedder())
 
 
 class AskRequest(BaseModel):
@@ -58,7 +70,12 @@ def ask(body: AskRequest, request: Request) -> dict:
 def health() -> dict:
     retriever = get_retriever()
     sources = sorted({c.source for c in retriever.chunks})
-    return {"status": "ok", "mode": "claude" if use_claude() else "extractive", "documents": len(sources), "chunks": len(retriever.chunks)}
+    return {
+        "status": "ok",
+        "mode": "local-models" if use_models() else "keyword",
+        "documents": len(sources),
+        "chunks": len(retriever.chunks),
+    }
 
 
 @app.get("/api/sources")

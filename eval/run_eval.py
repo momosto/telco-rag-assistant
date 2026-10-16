@@ -1,7 +1,7 @@
 """Score the assistant on 20 questions with known answers.
 
-    python -m eval.run_eval                 # uses Claude if ANTHROPIC_API_KEY is set
-    RAG_MODE=extractive python -m eval.run_eval
+    python -m eval.run_eval                 # local models (run scripts/download_models.py first)
+    RAG_MODE=keyword python -m eval.run_eval  # keyword search only, no models
 
 A question counts as correct when:
 - answerable: every expected fact appears in the answer (any listed spelling)
@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from rag.answer import answer, use_claude
+from rag.answer import answer, use_models
 from rag.api import get_retriever
 
 HERE = Path(__file__).resolve().parent
@@ -41,7 +41,7 @@ def grade(item: dict, result) -> tuple[bool, str]:
 def main() -> int:
     items = json.loads((HERE / "questions.json").read_text(encoding="utf-8"))
     retriever = get_retriever()
-    mode = "claude" if use_claude() else "extractive"
+    mode = "local-models" if use_models() else "keyword"
     rows, passed = [], 0
 
     for item in items:
