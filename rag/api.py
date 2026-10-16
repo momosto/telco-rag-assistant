@@ -21,7 +21,7 @@ STATIC_DIR = ROOT / "static"
 
 # Best-effort per-IP limit. On serverless hosts each instance keeps its own window,
 # so put a real limiter (gateway or Redis) in front of anything that spends money.
-RATE_LIMIT = 15  # requests
+RATE_LIMIT = 30  # requests
 RATE_WINDOW = 60  # seconds
 _requests: dict[str, deque] = defaultdict(deque)
 

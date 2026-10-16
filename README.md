@@ -11,10 +11,10 @@ The knowledge base belongs to **Mhepo Telecom, a fictional operator**: fibre pla
 ## What it does
 
 - **Ingests** Markdown, text, PDF files and web pages, and splits them into sections that keep their headings, so a citation reads "Billing and payments > Ways to pay" rather than "chunk 17".
-- **Retrieves** the most relevant sections with BM25 keyword search.
+- **Retrieves** the most relevant sections with BM25 keyword search, tuned for how customers phrase things: synonyms ("packages" finds plans), phrases ("how much", "my internet is down"), and a bonus when a section's heading names the topic.
 - **Answers with citations.** The retrieved sections go to Claude as documents with [citations](https://docs.claude.com/en/docs/build-with-claude/citations) enabled, so each sentence in the answer is tied to the exact text it came from. The chat UI shows those passages under every answer.
 - **Says "I don't know"** when nothing relevant is found, or when the documents don't contain the answer, instead of guessing.
-- **Degrades instead of failing.** Without an API key, or if the model call fails, it quotes the best-matching sentences directly from the documents, still with sources.
+- **Degrades instead of failing.** Without an API key, or if the model call fails, it shows the best-matching section in full (tables rewritten as readable lines, filtered to the plan or bundle asked about), still with sources.
 - **Is evaluated.** `eval/run_eval.py` runs 20 questions with known answers, including four that should be declined, and reports the share answered correctly and cited to the right document.
 
 ## Run it in 2 minutes
@@ -47,7 +47,7 @@ flowchart LR
     B --> R
     R -->|nothing relevant| IDK["I don't know"]
     R -->|API key set| L[Claude with citations enabled]
-    R -->|no key or model error| X[Quote best sentences]
+    R -->|no key or model error| X[Quote best section]
     L --> A[Answer + cited passages]
     X --> A
     L -->|documents lack the answer| IDK
@@ -71,14 +71,25 @@ An answerable question passes only if every expected fact is in the answer **and
 
 | Mode | Score | Answerable | Correctly declined |
 |---|---|---|---|
-| Quote-only (no model) | 15/20 (75%) | 12/16 | 3/4 |
+| Quote-only (no model) | 19/20 (95%) | 16/16 | 3/4 |
 | Claude | run `python -m eval.run_eval` with a key; results land in `eval/results-claude.md` | | |
 
-The quote-only baseline is deliberately simple. It fails where the answer sits in a table row or needs two facts combined, and it can't tell that a question about iPhone prices is out of scope. Those gaps are what the model is for.
+**Read that 95% with care: retrieval was tuned while looking at these questions.** For an honest number, `eval/heldout.json` holds 20 differently worded questions written after tuning and never tuned on:
+
+```bash
+python -m eval.retrieval_heldout
+```
+
+| Held-out retrieval | Result |
+|---|---|
+| Expected section ranked first | 14/20 (70%) |
+| Expected section in the top two | 16/20 (80%) |
+
+The misses are questions whose meaning isn't in their words: "I just got installed and changed my mind" should find the cooling-off period, and "Can I move to a faster plan?" finds "Moving house". Keyword search can't bridge that; embeddings or the model can, which is the next step on the roadmap. The quote-only mode also can't tell that a question about iPhone prices is out of scope when "17" and "shop" both match.
 
 ## Design decisions
 
-- **BM25 instead of embeddings, for now.** For a few dozen sections, keyword search finds the right one in the top four for every evaluation question. It needs no second API key and keeps serverless cold starts fast. `BM25Retriever.search()` is the seam where a pgvector or Chroma retriever would plug in.
+- **BM25 instead of embeddings, for now.** For a few dozen sections, keyword search with synonyms finds the right section first for 70% of unseen questions, and within the four sections the model reads for 80%. It needs no second API key and keeps serverless cold starts fast. `BM25Retriever.search()` is the seam where a pgvector or Chroma retriever would plug in.
 - **Native citations instead of asking the model to write `[1]`.** The API returns the exact cited span, so citations can't point at text that isn't in the source.
 - **Abstain at two layers.** Retrieval returns nothing unless a section shares at least two distinct words with the question (one shared word, like "offer" or "rate", is what off-topic questions look like), and the prompt tells the model to decline when the retrieved sections don't contain the answer.
 - **Cheap by default.** Effort is set to `low` for short support answers, the public demo runs without a key, and `/api/ask` has a per-IP rate limit (best-effort on serverless; put a gateway limiter in front of a paid deployment).
@@ -101,7 +112,7 @@ rag/retriever.py   BM25 index
 rag/answer.py      Claude with citations, quote-only fallback, abstain logic
 rag/api.py         FastAPI routes and rate limit
 static/index.html  chat UI
-eval/              20 questions and the scoring script
+eval/              20 scored questions, 20 held-out retrieval questions, scripts
 tests/             unit and API tests (Claude calls are faked; no key needed)
 data/docs/         fictional Mhepo Telecom knowledge base
 ```

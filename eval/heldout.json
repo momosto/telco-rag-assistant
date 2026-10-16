@@ -1,0 +1,22 @@
+[
+  {"question": "What's the monthly price of Fibre Home?", "section": "Plans and monthly prices"},
+  {"question": "Which fibre plan is the fastest?", "section": "Plans and monthly prices"},
+  {"question": "Do I get a router with fibre?", "section": "Mhepo Fibre home plans"},
+  {"question": "How soon can a technician come to install?", "section": "Installation"},
+  {"question": "Can I move to a faster plan?", "section": "Upgrades and downgrades"},
+  {"question": "I'm relocating, can I take my fibre with me?", "section": "Moving house"},
+  {"question": "Is there a weekly data bundle?", "section": "Daily, weekly and monthly bundles"},
+  {"question": "Does WhatsApp data come cheaper?", "section": "Social bundle"},
+  {"question": "Will my leftover data carry over to next month?", "section": "Rollover"},
+  {"question": "Can I pay by debit order?", "section": "Ways to pay"},
+  {"question": "When do I get my statement?", "section": "Statements"},
+  {"question": "My bill is overdue, will you cut me off?", "section": "Due date and late payment"},
+  {"question": "The LOS light on my router is red", "section": "Before you report a fault"},
+  {"question": "Do I get compensated if my line is down for days?", "section": "Service credit"},
+  {"question": "Can I use my driver's licence to register a SIM?", "section": "Registering a new SIM"},
+  {"question": "Can I get an eSIM?", "section": "eSIM"},
+  {"question": "What does roaming cost without a bundle?", "section": "Without a bundle"},
+  {"question": "Can I run a Wi-Fi hotspot for my neighbours?", "section": "Fair usage policy"},
+  {"question": "What if I don't give the router back?", "section": "Returning the router"},
+  {"question": "I just got installed and changed my mind", "section": "Cooling-off period"}
+]

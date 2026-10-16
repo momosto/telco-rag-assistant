@@ -125,47 +125,55 @@ def _answer_with_claude(question: str, hits: list[Hit]) -> Answer:
     return Answer(text, "claude", citations, retrieved)
 
 
-def _sentences(text: str) -> list[str]:
-    lines = []
-    for line in text.splitlines():
-        line = line.strip().lstrip("-*0123456789. ").strip()
-        if not line or set(line) <= set("|-: "):
-            continue
+def _cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def format_section(text: str, terms: set[str], idf: dict[str, float]) -> list[str]:
+    """Render a section as readable lines: tables become "Fibre Plus: 50 / 25 Mbps, USD 85".
+
+    When the question names a specific row (a plan or bundle), only matching rows are kept.
+    """
+    out: list[str] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
         if line.startswith("|"):
-            lines.append(" ".join(cell.strip() for cell in line.strip("|").split("|")))
-        else:
-            lines.extend(s.strip() for s in re.split(r"(?<=[.!?])\s+", line) if s.strip())
-    return lines
+            table = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                table.append(lines[i].strip())
+                i += 1
+            header = _cells(table[0])
+            rows = [_cells(r) for r in table[1:] if not set(r) <= set("|-: ")]
+            header_terms = set(tokenize(" ".join(header)))
+            # Distinctive question words that appear in some rows but not the header.
+            row_terms = {t for t in terms - header_terms if idf.get(t, 0) > 1.0}
+            matching = [r for r in rows if row_terms & set(tokenize(" ".join(r)))]
+            for row in matching or rows:
+                details = ", ".join(f"{v}" for v in row[1:])
+                out.append(f"{row[0]}: {details}" if details else row[0])
+            continue
+        if line:
+            out.append(line)
+        i += 1
+    return out
 
 
 def _answer_extractive(question: str, hits: list[Hit], idf: dict[str, float] | None = None) -> Answer:
+    """Without a model, answer with the best-matching section, quoted in full."""
+    retrieved = [h.chunk.title for h in hits]
+    if not hits:
+        return Answer(IDK, "abstain", retrieved=retrieved)
     terms = set(tokenize(question))
     terms |= {syn for t in terms for syn in SYNONYMS.get(t, [])}
-    idf = idf or {}
-    best: list[tuple[float, int, str, Hit]] = []
-    for rank, hit in enumerate(hits):
-        for position, sentence in enumerate(_sentences(hit.chunk.text)):
-            overlap = terms & set(tokenize(sentence))
-            if overlap:
-                weight = sum(idf.get(t, 1.0) for t in overlap)
-                best.append((weight - rank * 0.3, position, sentence, hit))
-    retrieved = [h.chunk.title for h in hits]
-    if not best:
-        return Answer(IDK, "abstain", retrieved=retrieved)
-
-    best.sort(key=lambda t: t[0], reverse=True)
-    top_score, top_pos, top_sentence, top_hit = best[0]
-    # Quote the best sentence plus one more from the same section: the runner-up if it
-    # is close, otherwise the sentence that follows (which usually carries the detail).
-    section = _sentences(top_hit.chunk.text)
-    runner_up = next((b for b in best[1:] if b[3] is top_hit and b[0] >= top_score * 0.6), None)
-    if runner_up:
-        picked = sorted([(top_pos, top_sentence), (runner_up[1], runner_up[2])])
-    elif top_pos + 1 < len(section):
-        picked = [(top_pos, top_sentence), (top_pos + 1, section[top_pos + 1])]
-    else:
-        picked = [(top_pos, top_sentence)]
-    chosen = [s for _, s in picked]
-    citations = [Citation(top_hit.chunk.source, top_hit.chunk.title, s) for s in chosen]
-    text = " ".join(s if s.endswith((".", "!", "?")) else s + "." for s in chosen)
-    return Answer(text, "extractive", citations, retrieved)
+    # Quote the best section, plus the runner-up when it scores nearly as well: near-ties
+    # usually mean the answer spans two sections ("lost SIM": registration and replacement).
+    chosen = [hits[0]] + [h for h in hits[1:2] if h.score >= hits[0].score * 0.8]
+    parts, citations = [], []
+    for hit in chosen:
+        lines = format_section(hit.chunk.text, terms, idf or {})
+        heading = hit.chunk.title.split(" > ")[-1]
+        parts.append(f"From \u201c{heading}\u201d:\n" + "\n".join(lines))
+        citations.append(Citation(hit.chunk.source, hit.chunk.title, "\n".join(lines)))
+    return Answer("\n\n".join(parts), "extractive", citations, retrieved)
