@@ -134,3 +134,8 @@ def test_api_ask_health_and_validation():
 def test_sources_lists_every_document():
     assert len(get_retriever().chunks) > 20
     assert len(TestClient(app).get("/api/sources").json()) == 8
+
+
+@pytest.mark.parametrize("question", ["Does Mhepo offer satellite TV packages?", "What is today's exchange rate for ZiG?"])
+def test_single_shared_word_is_not_enough_to_answer(retriever, question):
+    assert retriever.search(question) == []

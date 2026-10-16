@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 
-from .retriever import BM25Retriever, Hit, tokenize
+from .retriever import SYNONYMS, BM25Retriever, Hit, tokenize
 
 log = logging.getLogger(__name__)
 
@@ -140,22 +140,32 @@ def _sentences(text: str) -> list[str]:
 
 def _answer_extractive(question: str, hits: list[Hit], idf: dict[str, float] | None = None) -> Answer:
     terms = set(tokenize(question))
+    terms |= {syn for t in terms for syn in SYNONYMS.get(t, [])}
     idf = idf or {}
-    best: list[tuple[float, str, Hit]] = []
+    best: list[tuple[float, int, str, Hit]] = []
     for rank, hit in enumerate(hits):
-        for sentence in _sentences(hit.chunk.text):
+        for position, sentence in enumerate(_sentences(hit.chunk.text)):
             overlap = terms & set(tokenize(sentence))
             if overlap:
                 weight = sum(idf.get(t, 1.0) for t in overlap)
-                best.append((weight - rank * 0.3, sentence, hit))
+                best.append((weight - rank * 0.3, position, sentence, hit))
     retrieved = [h.chunk.title for h in hits]
     if not best:
         return Answer(IDK, "abstain", retrieved=retrieved)
 
     best.sort(key=lambda t: t[0], reverse=True)
-    top_score, _, top_hit = best[0]
-    # Quote at most two sentences, both from the section the best match came from.
-    chosen = [b for b in best if b[2] is top_hit and b[0] >= top_score * 0.6][:2]
-    citations = [Citation(h.chunk.source, h.chunk.title, s) for _, s, h in chosen]
-    text = " ".join(s if s.endswith((".", "!", "?")) else s + "." for _, s, _ in chosen)
+    top_score, top_pos, top_sentence, top_hit = best[0]
+    # Quote the best sentence plus one more from the same section: the runner-up if it
+    # is close, otherwise the sentence that follows (which usually carries the detail).
+    section = _sentences(top_hit.chunk.text)
+    runner_up = next((b for b in best[1:] if b[3] is top_hit and b[0] >= top_score * 0.6), None)
+    if runner_up:
+        picked = sorted([(top_pos, top_sentence), (runner_up[1], runner_up[2])])
+    elif top_pos + 1 < len(section):
+        picked = [(top_pos, top_sentence), (top_pos + 1, section[top_pos + 1])]
+    else:
+        picked = [(top_pos, top_sentence)]
+    chosen = [s for _, s in picked]
+    citations = [Citation(top_hit.chunk.source, top_hit.chunk.title, s) for s in chosen]
+    text = " ".join(s if s.endswith((".", "!", "?")) else s + "." for s in chosen)
     return Answer(text, "extractive", citations, retrieved)

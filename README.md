@@ -71,7 +71,7 @@ An answerable question passes only if every expected fact is in the answer **and
 
 | Mode | Score | Answerable | Correctly declined |
 |---|---|---|---|
-| Quote-only (no model) | 13/20 (65%) | 11/16 | 2/4 |
+| Quote-only (no model) | 15/20 (75%) | 12/16 | 3/4 |
 | Claude | run `python -m eval.run_eval` with a key; results land in `eval/results-claude.md` | | |
 
 The quote-only baseline is deliberately simple. It fails where the answer sits in a table row or needs two facts combined, and it can't tell that a question about iPhone prices is out of scope. Those gaps are what the model is for.
@@ -80,7 +80,7 @@ The quote-only baseline is deliberately simple. It fails where the answer sits i
 
 - **BM25 instead of embeddings, for now.** For a few dozen sections, keyword search finds the right one in the top four for every evaluation question. It needs no second API key and keeps serverless cold starts fast. `BM25Retriever.search()` is the seam where a pgvector or Chroma retriever would plug in.
 - **Native citations instead of asking the model to write `[1]`.** The API returns the exact cited span, so citations can't point at text that isn't in the source.
-- **Abstain at two layers.** Retrieval returns nothing when no section matches, and the prompt tells the model to decline when the retrieved sections don't contain the answer.
+- **Abstain at two layers.** Retrieval returns nothing unless a section shares at least two distinct words with the question (one shared word, like "offer" or "rate", is what off-topic questions look like), and the prompt tells the model to decline when the retrieved sections don't contain the answer.
 - **Cheap by default.** Effort is set to `low` for short support answers, the public demo runs without a key, and `/api/ask` has a per-IP rate limit (best-effort on serverless; put a gateway limiter in front of a paid deployment).
 
 ## Hosting on Vercel

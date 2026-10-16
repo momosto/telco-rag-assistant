@@ -24,16 +24,32 @@ STOPWORDS = set(
 
 def stem(token: str) -> str:
     # Light suffix stripping so "monthly" matches "month" and "used" matches "use".
-    for suffix in ("ly", "ing", "ed", "es", "s"):
-        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
-            return token[: -len(suffix)] if suffix != "ed" else token[:-1]
+    if len(token) > 4 and token.endswith("ly"):
+        return token[:-2]
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+    if token.endswith("ed") and len(token) > 3:
+        return token[:-2] if len(token) > 5 else token[:-1]
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
     return token
+
+
+# Query-side synonyms for words customers use that the documents phrase differently.
+SYNONYMS = {
+    "switch": ["activate"],
+    "turn": ["activate"],
+    "cost": ["price", "fee"],
+    "price": ["cost"],
+    "fix": ["repair"],
+    "cancel": ["termination"],
+}
 
 
 def tokenize(text: str) -> list[str]:
     # Keep USSD codes like *300*9# and numbers like 0.10 as single tokens.
     tokens = re.findall(r"\*[\d*]+#|\d+(?:\.\d+)?|[a-z]+(?:-[a-z]+)*", text.lower())
-    return [stem(t) for t in tokens if t not in STOPWORDS]
+    return [stem(t) for t in tokens if t not in STOPWORDS and (len(t) > 1 or t.isdigit())]
 
 
 @dataclass(frozen=True)
@@ -66,9 +82,18 @@ class BM25Retriever:
 
     def search(self, query: str, k: int = 4, min_score: float = 1.0) -> list[Hit]:
         terms = tokenize(query)
+        terms += [syn for t in terms for syn in SYNONYMS.get(t, [])]
         if not terms:
             return []
-        scored = [Hit(c, self.score(terms, i)) for i, c in enumerate(self.chunks)]
+        # A section must share at least two distinct words with the question (or every
+        # word, for one-word questions). A single shared word like "offer" or "rate" is
+        # what off-topic questions look like, so those are declined.
+        needed = min(2, len(set(terms)))
+        scored = [
+            Hit(c, self.score(terms, i))
+            for i, c in enumerate(self.chunks)
+            if len(set(terms) & self.docs[i].keys()) >= needed
+        ]
         scored = [h for h in scored if h.score >= min_score]
         scored.sort(key=lambda h: h.score, reverse=True)
         return scored[:k]
