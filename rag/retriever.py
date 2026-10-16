@@ -129,6 +129,13 @@ class BM25Retriever:
         groups = [{t, *SYNONYMS.get(t, [])} for t in dict.fromkeys(tokenize(lowered))]
         return groups + phrase_groups
 
+    def off_topic(self, query: str) -> bool:
+        """Words the knowledge base never mentions ("satellite", "iPhone", "CEO") signal an
+        off-topic question. True when they outnumber the words it does mention."""
+        groups = self.concepts(query)
+        known = sum(1 for g in groups if g & self.idf.keys())
+        return len(groups) - known >= max(known, 1)
+
     def search(self, query: str, k: int = 4, min_score: float = 1.0) -> list[Hit]:
         groups = self.concepts(query)
         if not groups:
@@ -137,11 +144,7 @@ class BM25Retriever:
         # for one-idea questions). Matching a single word like "offer" or "rate" is what
         # off-topic questions look like, so those are declined.
         needed = min(2, len(groups))
-        # Words the knowledge base never mentions ("satellite", "iPhone", "CEO") signal an
-        # off-topic question. Decline when they outnumber the words it does mention.
-        vocabulary = self.idf.keys()
-        known = sum(1 for g in groups if g & vocabulary)
-        if len(groups) - known >= max(known, 1):
+        if self.off_topic(query):
             return []
         scored = []
         for i, chunk in enumerate(self.chunks):
