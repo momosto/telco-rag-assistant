@@ -1,0 +1,22 @@
+[
+  {"id": 1, "question": "How much is Fibre Plus per month?", "expect": [["USD 85", "$85", "85 USD"]], "source": "01-fibre-home-plans.md"},
+  {"id": 2, "question": "What does installation cost on a month-to-month Fibre Max plan?", "expect": [["USD 60", "$60", "60 USD"]], "source": "01-fibre-home-plans.md"},
+  {"id": 3, "question": "How much does it cost to move my fibre to a new house?", "expect": [["USD 30", "$30", "30 USD"]], "source": "01-fibre-home-plans.md"},
+  {"id": 4, "question": "When can I use the Night bundle?", "expect": [["23:00", "11 pm", "11pm"], ["05:00", "5 am", "5am"]], "source": "02-mobile-data-bundles.md"},
+  {"id": 5, "question": "How much is the Social bundle and how long does it last?", "expect": [["USD 2", "$2", "2 USD"], ["7 days", "seven days"]], "source": "02-mobile-data-bundles.md"},
+  {"id": 6, "question": "What is the out-of-bundle data rate?", "expect": [["0.10"]], "source": "02-mobile-data-bundles.md"},
+  {"id": 7, "question": "How do I block out-of-bundle data?", "expect": [["*300*9#"]], "source": "02-mobile-data-bundles.md"},
+  {"id": 8, "question": "What merchant code do I use to pay with EcoCash?", "expect": [["112233"]], "source": "03-billing-and-payments.md"},
+  {"id": 9, "question": "I paid my bill twice by mistake. What happens to the money?", "expect": [["credit"]], "source": "03-billing-and-payments.md"},
+  {"id": 10, "question": "What is the reconnection fee after my service is suspended?", "expect": [["USD 5", "$5", "5 USD"]], "source": "03-billing-and-payments.md"},
+  {"id": 11, "question": "How quickly should a business fibre fault be fixed?", "expect": [["4 hours", "four hours"]], "source": "04-faults-and-support.md"},
+  {"id": 12, "question": "How many SIM cards can one person register?", "expect": [["5", "five"]], "source": "05-sim-registration.md"},
+  {"id": 13, "question": "How much is a replacement SIM?", "expect": [["USD 2", "$2", "2 USD"]], "source": "05-sim-registration.md"},
+  {"id": 14, "question": "How do I switch on roaming before I travel?", "expect": [["*300*7#"]], "source": "06-roaming.md"},
+  {"id": 15, "question": "What speed do I drop to under the fair usage policy?", "expect": [["5 Mbps", "5Mbps"]], "source": "07-fair-usage-policy.md"},
+  {"id": 16, "question": "What is the fee for cancelling a 12-month contract early?", "expect": [["50%", "50 percent", "half"]], "source": "08-cancellations-and-refunds.md"},
+  {"id": 17, "question": "How much does an iPhone 17 cost at Mhepo shops?", "answerable": false},
+  {"id": 18, "question": "Does Mhepo offer satellite TV packages?", "answerable": false},
+  {"id": 19, "question": "Who is the CEO of Mhepo Telecom?", "answerable": false},
+  {"id": 20, "question": "What is today's exchange rate between ZiG and the US dollar?", "answerable": false}
+]
