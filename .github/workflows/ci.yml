@@ -10,6 +10,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('scripts/download_models.py') }}
+      - run: python scripts/download_models.py
       - run: pytest -q
-      - name: Evaluate (quote-only mode, no API key)
-        run: RAG_MODE=extractive python -m eval.run_eval
+      - name: Evaluate with the local models
+        run: python -m eval.run_eval
+      - name: Held-out retrieval check
+        run: python -m eval.retrieval_heldout

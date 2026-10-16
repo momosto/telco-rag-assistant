@@ -3,3 +3,4 @@ tests
 eval
 .github
 **/__pycache__
+scripts
