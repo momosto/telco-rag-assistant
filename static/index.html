@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mhepo Support Assistant</title>
+  <meta name="description" content="A support assistant that answers from a telecom provider's own documents and cites every answer." />
+  <style>
+    :root {
+      --bg: #f4f6f9; --panel: #ffffff; --ink: #121a26; --muted: #5a6677; --rule: #d9dfe7;
+      --accent: #1b5fd1; --you: #e6eefc; --warn: #8a5a00; --warn-bg: #fff4dc;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0d131b; --panel: #131c27; --ink: #e5eaf0; --muted: #98a4b4; --rule: #253244;
+        --accent: #6ea2ff; --you: #1a2a44; --warn: #f3c46b; --warn-bg: #2d2412; color-scheme: dark; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 140px; }
+    header h1 { font-size: 22px; margin: 0; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .mode { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--rule); margin-left: 6px; color: var(--muted); }
+    .examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+    .examples button { font: inherit; font-size: 14px; background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+    .examples button:hover { border-color: var(--accent); }
+    .msg { margin: 16px 0; }
+    .q { background: var(--you); padding: 10px 14px; border-radius: 12px; margin-left: auto; max-width: 85%; width: fit-content; }
+    .a { background: var(--panel); border: 1px solid var(--rule); padding: 14px 16px; border-radius: 12px; }
+    .a p { margin: 0; white-space: pre-wrap; }
+    .note { margin-top: 10px; font-size: 13px; color: var(--warn); background: var(--warn-bg); padding: 6px 10px; border-radius: 6px; }
+    .sources { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+    .sources h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+    .sources ol { margin: 0; padding-left: 20px; font-size: 14px; }
+    .sources li { margin-bottom: 6px; }
+    .sources q { color: var(--muted); }
+    .src { font-weight: 600; }
+    form { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--rule); padding: 12px 16px; }
+    .bar { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; }
+    input { flex: 1; font: inherit; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); min-width: 0; }
+    button[type=submit] { font: inherit; font-weight: 600; padding: 0 18px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
+    button[disabled] { opacity: .6; cursor: progress; }
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Mhepo support assistant <span class="mode" id="mode">checking…</span></h1>
+      <p>Answers come only from Mhepo's own documents, with the passage each answer is based on. Mhepo Telecom is fictional.</p>
+    </header>
+
+    <div class="examples" aria-label="Example questions">
+      <button type="button">How much is Fibre Plus per month?</button>
+      <button type="button">When can I use the Night bundle?</button>
+      <button type="button">I paid my bill twice. What happens?</button>
+      <button type="button">How do I switch on roaming?</button>
+      <button type="button">Who is Mhepo's CEO?</button>
+    </div>
+
+    <div id="log" aria-live="polite"></div>
+
+    <footer>Source code and evaluation results: <a href="https://github.com/momosto/telco-rag-assistant">github.com/momosto/telco-rag-assistant</a></footer>
+  </div>
+
+  <form id="ask">
+    <div class="bar">
+      <label for="question" class="visually-hidden" style="position:absolute;left:-9999px">Your question</label>
+      <input id="question" name="question" autocomplete="off" maxlength="500" placeholder="Ask about plans, bundles, billing, faults…" required />
+      <button type="submit">Ask</button>
+    </div>
+  </form>
+
+  <script>
+    const log = document.getElementById('log');
+    const form = document.getElementById('ask');
+    const input = document.getElementById('question');
+    const submit = form.querySelector('button[type=submit]');
+
+    fetch('/api/health').then(r => r.json()).then(h => {
+      document.getElementById('mode').textContent = h.mode === 'claude' ? 'AI answers' : 'quote-only mode';
+    }).catch(() => { document.getElementById('mode').textContent = 'offline'; });
+
+    function el(tag, attrs = {}, text) {
+      const node = document.createElement(tag);
+      Object.assign(node, attrs);
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function render(question, data) {
+      const wrap = el('div', { className: 'msg' });
+      wrap.append(el('div', { className: 'q' }, question));
+      const a = el('div', { className: 'a' });
+      a.append(el('p', {}, data.text));
+      if (data.note) a.append(el('div', { className: 'note' }, data.note));
+      if (data.citations && data.citations.length) {
+        const box = el('div', { className: 'sources' });
+        box.append(el('h2', {}, 'Sources'));
+        const ol = el('ol');
+        for (const c of data.citations) {
+          const li = el('li');
+          li.append(el('span', { className: 'src' }, c.title), document.createTextNode(': '), el('q', {}, c.quote));
+          ol.append(li);
+        }
+        box.append(ol);
+        a.append(box);
+      }
+      wrap.append(a);
+      log.append(wrap);
+      wrap.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'end' });
+    }
+
+    async function ask(question) {
+      submit.disabled = true;
+      submit.textContent = 'Asking…';
+      try {
+        const res = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'The assistant could not answer. Try again.');
+        render(question, data);
+      } catch (err) {
+        render(question, { text: err.message, citations: [] });
+      } finally {
+        submit.disabled = false;
+        submit.textContent = 'Ask';
+      }
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (q.length < 2) return;
+      input.value = '';
+      ask(q);
+    });
+
+    document.querySelectorAll('.examples button').forEach(b => b.addEventListener('click', () => ask(b.textContent)));
+  </script>
+</body>
+</html>
