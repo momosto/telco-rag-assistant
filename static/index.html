@@ -115,7 +115,9 @@
         const ol = el('ol');
         for (const c of data.citations) {
           const li = el('li');
-          li.append(el('span', { className: 'src' }, c.title), el('blockquote', {}, c.quote));
+          li.append(el('span', { className: 'src' }, c.title));
+          // Section answers already show the text; only model answers need the section quoted.
+          if (data.mode === 'model') li.append(el('blockquote', {}, c.quote));
           ol.append(li);
         }
         box.append(ol);
