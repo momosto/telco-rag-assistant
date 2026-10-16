@@ -33,7 +33,9 @@
     .sources h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
     .sources ol { margin: 0; padding-left: 20px; font-size: 14px; }
     .sources li { margin-bottom: 6px; }
-    .sources q { color: var(--muted); }
+    .sources blockquote { margin: 4px 0 0; color: var(--muted); white-space: pre-wrap; }
+    mark { background: #fff1a8; color: #121a26; padding: 0 2px; border-radius: 3px; }
+    .conf { margin-top: 8px; font-size: 12px; color: var(--muted); }
     .src { font-weight: 600; }
     form { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--rule); padding: 12px 16px; }
     .bar { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; }
@@ -49,7 +51,7 @@
   <div class="wrap">
     <header>
       <h1>Mhepo support assistant <span class="mode" id="mode">checking…</span></h1>
-      <p>Answers come only from Mhepo's own documents, with the passage each answer is based on. Mhepo Telecom is fictional.</p>
+      <p>Answers come only from Mhepo's own documents, found and read by two small AI models running inside this app. No outside AI service. Mhepo Telecom is fictional.</p>
     </header>
 
     <div class="examples" aria-label="Example questions">
@@ -80,7 +82,7 @@
     const submit = form.querySelector('button[type=submit]');
 
     fetch('/api/health').then(r => r.json()).then(h => {
-      document.getElementById('mode').textContent = h.mode === 'claude' ? 'AI answers' : 'quote-only mode';
+      document.getElementById('mode').textContent = h.mode === 'local-models' ? 'local AI models' : 'keyword search';
     }).catch(() => { document.getElementById('mode').textContent = 'offline'; });
 
     function el(tag, attrs = {}, text) {
@@ -94,15 +96,26 @@
       const wrap = el('div', { className: 'msg' });
       wrap.append(el('div', { className: 'q' }, question));
       const a = el('div', { className: 'a' });
-      a.append(el('p', {}, data.text));
-      if (data.note) a.append(el('div', { className: 'note' }, data.note));
+      const p = el('p');
+      const at = data.highlight ? data.text.indexOf(data.highlight) : -1;
+      if (at >= 0) {
+        // Highlight the span the reading model picked, inside its sentence.
+        p.append(document.createTextNode(data.text.slice(0, at)), el('mark', {}, data.highlight),
+                 document.createTextNode(data.text.slice(at + data.highlight.length)));
+      } else {
+        p.textContent = data.text;
+      }
+      a.append(p);
+      if (data.confidence != null) {
+        a.append(el('div', { className: 'conf' }, `Reading model confidence: ${Math.round(data.confidence * 100)}%`));
+      }
       if (data.citations && data.citations.length) {
         const box = el('div', { className: 'sources' });
-        box.append(el('h2', {}, 'Sources'));
+        box.append(el('h2', {}, data.mode === 'model' ? 'Full section' : 'Sources'));
         const ol = el('ol');
         for (const c of data.citations) {
           const li = el('li');
-          li.append(el('span', { className: 'src' }, c.title), document.createTextNode(': '), el('q', {}, c.quote));
+          li.append(el('span', { className: 'src' }, c.title), el('blockquote', {}, c.quote));
           ol.append(li);
         }
         box.append(ol);
